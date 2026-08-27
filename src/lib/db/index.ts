@@ -14,7 +14,8 @@ export function getDb(): Database.Database {
   if (globalThis.__crmDatabase) return globalThis.__crmDatabase;
   const filename = databasePath();
   fs.mkdirSync(path.dirname(filename), { recursive: true });
-  const db = new Database(filename);
+  const db = new Database(filename, { timeout: 30_000 });
+  db.pragma("busy_timeout = 30000");
   db.pragma("journal_mode = WAL");
   db.exec(schema);
   migrateSchema(db);

@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 const now = new Date();
 const iso = (days = 0) => new Date(now.getTime() + days * 86_400_000).toISOString();
 
-export function seed(db: Database.Database): void {
+function insertSeedData(db: Database.Database): void {
   const insertUser = db.prepare("INSERT OR IGNORE INTO users (id, name, role, active) VALUES (?, ?, ?, 1)");
   insertUser.run("user_admin", "林然（管理员）", "admin");
   insertUser.run("user_alice", "陈晓（销售）", "sales");
@@ -45,4 +45,8 @@ export function seed(db: Database.Database): void {
     { id:"act_4", customer:"cust_cloud", contact:"contact_zhao", subject:"现场工作坊", type:"拜访", content:"完成核心流程梳理。", occurred:iso(-1), next:iso(8), owner:"user_bob" }
   ];
   for (const item of activities) activity.run({ ...item, created:item.occurred, updated:item.occurred });
+}
+
+export function seed(db: Database.Database): void {
+  db.transaction(() => insertSeedData(db)).immediate();
 }

@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 export type OAuthDiagnosticLevel = "info" | "success" | "error";
 
 export type OAuthDiagnosticEvent = {
@@ -91,5 +94,3 @@ export function safeOrigin(value: unknown): string {
     return value ? "invalid-url" : "missing";
   }
 }
-import fs from "node:fs";
-import path from "node:path";

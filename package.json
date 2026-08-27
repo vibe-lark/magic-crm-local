@@ -11,6 +11,7 @@
     "dev:http": "next dev",
     "build": "next build",
     "start": "node .next/standalone/server.js",
+    "public:check": "bash scripts/public-check.sh",
     "typecheck": "tsc --noEmit",
     "test": "DATABASE_PATH=./data/test.sqlite node --import tsx --test tests/*.test.ts",
     "db:init": "tsx scripts/init-db.ts",

@@ -13,6 +13,7 @@ MKCERT_VERSION="1.4.4"
 SETUP_ONLY=false
 CHECK_ONLY=false
 RESET_DB=false
+OPEN_FEISHU=false
 
 info() { printf '\033[1;34m[local-demo]\033[0m %s\n' "$*"; }
 success() { printf '\033[1;32m[local-demo]\033[0m %s\n' "$*"; }
@@ -20,11 +21,12 @@ fail() { printf '\033[1;31m[local-demo]\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/local-demo.sh [--setup-only] [--check] [--reset-db]
+Usage: bash scripts/local-demo.sh [--setup-only] [--check] [--reset-db] [--open-feishu]
 
   --setup-only  Configure dependencies, environment, certificate and database.
   --check       Read-only validation of the local HTTPS deployment.
   --reset-db    Reset CRM demo data before starting (destructive to local demo data).
+  --open-feishu Copy the callback and open this app's Feishu security settings.
 EOF
 }
 
@@ -33,12 +35,14 @@ for argument in "$@"; do
     --setup-only) SETUP_ONLY=true ;;
     --check) CHECK_ONLY=true ;;
     --reset-db) RESET_DB=true ;;
+    --open-feishu) OPEN_FEISHU=true ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; fail "Unknown argument: $argument" ;;
   esac
 done
 
 if $CHECK_ONLY && $RESET_DB; then fail "--check cannot be combined with --reset-db"; fi
+if $CHECK_ONLY && $OPEN_FEISHU; then fail "--check cannot be combined with --open-feishu"; fi
 
 cd "$PROJECT_DIR"
 
@@ -151,6 +155,70 @@ set_env_value() {
   mv "$temporary" "$ENV_FILE"
 }
 
+copy_callback_to_clipboard() {
+  if [ "$(os_name)" = "macos" ]; then
+    command -v pbcopy >/dev/null 2>&1 || return 1
+    printf '%s' "$CALLBACK_URL" | pbcopy
+    return
+  fi
+  if command -v wl-copy >/dev/null 2>&1; then
+    printf '%s' "$CALLBACK_URL" | wl-copy
+  elif command -v xclip >/dev/null 2>&1; then
+    printf '%s' "$CALLBACK_URL" | xclip -selection clipboard
+  elif command -v xsel >/dev/null 2>&1; then
+    printf '%s' "$CALLBACK_URL" | xsel --clipboard --input
+  else
+    return 1
+  fi
+}
+
+open_feishu_safe_page() {
+  local url="$1"
+  if [ "$(os_name)" = "macos" ]; then
+    command -v open >/dev/null 2>&1 || return 1
+    open "$url" >/dev/null 2>&1
+    return
+  fi
+  command -v xdg-open >/dev/null 2>&1 || return 1
+  xdg-open "$url" >/dev/null 2>&1 &
+}
+
+guide_feishu_redirect() {
+  local app_id="$1" safe_url
+  safe_url="https://open.feishu.cn/app/$app_id/safe"
+  printf '\nConfigure the Feishu redirect URL:\n'
+  printf '  1. Open: %s\n' "$safe_url"
+  printf '  2. Under Redirect URL, add and save: %s\n\n' "$CALLBACK_URL"
+  if copy_callback_to_clipboard; then
+    success "Feishu callback copied to the clipboard"
+  else
+    info "Clipboard tool is unavailable; copy the callback shown above"
+  fi
+  if open_feishu_safe_page "$safe_url"; then
+    success "Opened Feishu security settings"
+  else
+    info "Could not open a browser; open the URL shown above manually"
+  fi
+  printf 'After adding and saving the redirect URL, press Enter to continue... '
+  IFS= read -r _
+}
+
+maybe_guide_feishu_redirect() {
+  local app_id="$1" first_configuration="$2" answer
+  if [ ! -t 0 ]; then
+    if $OPEN_FEISHU; then
+      printf '\nOpen this Feishu security settings page and register the callback:\n  https://open.feishu.cn/app/%s/safe\n  %s\n' "$app_id" "$CALLBACK_URL"
+    fi
+    return
+  fi
+  if ! $first_configuration && ! $OPEN_FEISHU; then
+    printf 'Open Feishu security settings to check the redirect URL again? [y/N] '
+    IFS= read -r answer
+    case "$answer" in y|Y|yes|YES|Yes) ;; *) return ;; esac
+  fi
+  guide_feishu_redirect "$app_id"
+}
+
 configure_environment() {
   if $CHECK_ONLY; then
     [ -f "$ENV_FILE" ] || fail ".env.local is missing"
@@ -166,7 +234,7 @@ configure_environment() {
   set_env_value FEISHU_OAUTH_REDIRECT_URI "$CALLBACK_URL"
   set_env_value MCP_ALLOWED_ORIGINS "https://localhost:3000,https://127.0.0.1:3000"
 
-  local app_id app_secret
+  local app_id app_secret first_configuration=false
   app_id="$(env_value LARK_APP_ID)"
   app_secret="$(env_value LARK_APP_SECRET)"
   if [ -z "$app_id" ]; then
@@ -175,6 +243,7 @@ configure_environment() {
     IFS= read -r app_id
     [ -n "$app_id" ] || fail "Feishu App ID cannot be empty"
     set_env_value LARK_APP_ID "$app_id"
+    first_configuration=true
   fi
   if [ -z "$app_secret" ]; then
     [ -t 0 ] || fail "LARK_APP_SECRET is missing; run setup interactively or edit .env.local"
@@ -183,9 +252,11 @@ configure_environment() {
     printf '\n'
     [ -n "$app_secret" ] || fail "Feishu App Secret cannot be empty"
     set_env_value LARK_APP_SECRET "$app_secret"
+    first_configuration=true
   fi
   chmod 600 "$ENV_FILE"
   success "Environment is configured without exposing credentials"
+  maybe_guide_feishu_redirect "$app_id" "$first_configuration"
 }
 
 verify_running_service() {
@@ -196,6 +267,8 @@ verify_running_service() {
   printf '%s' "$metadata" | grep -q '"authorization_endpoint":"https://localhost:3000/oauth/authorize"' || fail "OAuth metadata is not using the expected HTTPS authorization endpoint"
   success "HTTPS certificate, health check and OAuth metadata are valid"
 }
+
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then return 0; fi
 
 ensure_bun
 ensure_certificate

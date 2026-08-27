@@ -27,6 +27,14 @@ function bind(service: CrmService, openId: string, name = openId) {
 }
 
 describe("CRM business service", () => {
+  test("demo seeding is idempotent", () => {
+    const { db } = makeService();
+    seed(db);
+    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM customers").get() as { count: number }).count, 4);
+    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM contacts").get() as { count: number }).count, 4);
+    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM activities").get() as { count: number }).count, 4);
+  });
+
   test("sales users only see records they own", () => {
     const { crm: service } = makeService();
     const alice = service.actor("user_alice");

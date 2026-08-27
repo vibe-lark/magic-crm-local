@@ -39,6 +39,14 @@ bun run local
 
 首次运行可能要求系统密码或 sudo，这是 macOS Keychain 或 Linux 系统证书库信任本地 CA 的正常安全步骤。脚本不会读取或保存系统密码。
 
+首次输入飞书 App ID/Secret 后，脚本会自动复制 callback，并打开该应用的飞书开放平台“安全设置”页面：
+
+```text
+https://open.feishu.cn/app/<LARK_APP_ID>/safe
+```
+
+在“重定向 URL”中粘贴并保存后，回到终端按回车继续。已有凭证时脚本会询问是否重新打开；也可随时运行 `bun run local -- --open-feishu`。
+
 脚本完成后会输出三个固定地址：
 
 ```text
@@ -59,9 +67,10 @@ Feishu callback: https://localhost:3000/oauth/feishu/callback
 4. 生成包含 `localhost`、`127.0.0.1`、`::1` 的证书。
 5. 将私钥权限设为 `0600`，证书剩余不足 30 天时自动重建。
 6. 创建或保留 `.env.local`，只交互补充缺失的飞书 App ID/Secret。
-7. 强制统一 HTTPS base URL、飞书 callback 和允许的 Origin。
-8. 安装依赖并执行幂等数据库初始化。
-9. 检查 3000 端口，启动 Next.js，验证证书、health 和 OAuth metadata。
+7. 首次配置时复制 callback、打开当前应用的 `/safe` 安全设置，并等待用户保存确认。
+8. 强制统一 HTTPS base URL、飞书 callback 和允许的 Origin。
+9. 安装依赖并执行幂等数据库初始化。
+10. 检查 3000 端口，启动 Next.js，验证证书、health 和 OAuth metadata。
 
 脚本不会覆盖已有飞书凭证，不会自动重置 CRM 数据，也不会杀死占用 3000 端口的未知进程。
 
@@ -122,6 +131,7 @@ MCP_ALLOWED_ORIGINS=https://localhost:3000,https://127.0.0.1:3000
 bun run local                 # 日常启动；配置步骤幂等
 bun run local:setup           # 只准备环境，适合演示前预装
 bun run local:check           # 服务运行时执行只读检查
+bun run local -- --open-feishu # 重新复制 callback 并打开安全设置
 bun run local -- --reset-db   # 明确丢弃本地演示修改并重置
 ```
 
@@ -134,6 +144,7 @@ bun run local -- --reset-db   # 明确丢弃本地演示修改并重置
 | `invalid_https_url` | 使用了旧 HTTP 连接器 | 删除旧连接器，用 HTTPS 地址重建 |
 | `certificate authority invalid` | CA 未被系统或豆包信任 | 重新运行 `mkcert -install`，彻底退出并重开豆包 |
 | 飞书 `redirect_uri` 错误 | 平台仍登记 HTTP callback | 改为精确的 HTTPS callback |
+| 未自动打开安全设置 | 系统缺少 `open`/`xdg-open` 或没有桌面环境 | 使用终端打印的 `/safe` 链接手动打开；callback 也会完整打印 |
 | `Port 3000 is already in use` | 已有服务或其他程序占用 | 停止对应进程，不要让脚本自动杀进程 |
 | health 成功但授权不弹窗 | 连接器缓存旧 metadata | 删除连接器并重新注入 |
 | Linux 浏览器仍不信任 | NSS 库未更新或浏览器未重启 | 安装 NSS 工具，重跑 `mkcert -install` 并重启客户端 |
