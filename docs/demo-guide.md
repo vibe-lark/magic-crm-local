@@ -3,12 +3,12 @@
 建议演示时长 8–12 分钟。演示前运行：
 
 ```bash
-bun run db:reset
-bun run dev
-cloudflared tunnel --url http://localhost:3000
+bun run local -- --reset-db
 ```
 
-更新 `APP_BASE_URL` 并重启服务，然后确认 `/demo` 的健康状态为“服务正常”。
+保持 `APP_BASE_URL=https://localhost:3000`，然后确认 `/demo` 的健康状态为“服务正常”。
+
+同时确认 `/demo` 显示“飞书 OAuth：已配置”，并在飞书开放平台精确登记 `https://localhost:3000/oauth/feishu/callback`。
 
 ## 第一幕：完整 CRM 网页
 
@@ -30,8 +30,8 @@ cloudflared tunnel --url http://localhost:3000
 
 1. 打开 `/demo`，复制 HTTPS MCP 地址。
 2. 在豆包工作添加自定义 MCP 连接器。
-3. 授权页选择“陈晓（销售）”并确认。
-4. 说明页面跳回豆包是标准 OAuth 行为：豆包收到授权码后才会交换 Token。
+3. 在飞书页面登录并确认。重置数据库后的第一位飞书用户会绑定管理员。
+4. 说明浏览器先回本机绑定 CRM 身份，再跳回豆包；豆包收到 CRM 授权码后才交换 Token。
 
 推荐提问：
 
@@ -39,7 +39,7 @@ cloudflared tunnel --url http://localhost:3000
 汇总当前账号能看到的客户和最近 30 天跟进情况。
 ```
 
-预期：只统计陈晓负责的两个客户。
+预期：首次登录用户是管理员，可统计全部客户。用第二个飞书账号重新连接，可演示陈晓销售数据的隔离。
 
 继续提问：
 
@@ -61,8 +61,9 @@ cloudflared tunnel --url http://localhost:3000
 
 ## 故障预案
 
-- 隧道失效：重新运行 cloudflared，更新 `.env.local` 并重新注册连接器。
+- 本地注入失败：在 `/demo` 清空 OAuth 诊断，重新注入后查看第一个错误事件。
 - 授权异常：删除豆包中的连接器并重新发起，不复用旧授权页面。
+- 飞书回调错误：核对开放平台回调与 `FEISHU_OAUTH_REDIRECT_URI` 完全一致，并确认本地 3000 端口仍在运行。
 - 数据被改乱：运行 `bun run db:reset`。
 - MCP Session 丢失：让豆包重新连接；本地服务重启后 Session 失效是预期行为。
 - 临时无法演示豆包：使用 `/demo` 展示标准端点，再用 MCP Inspector 完成本地调用。

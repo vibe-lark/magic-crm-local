@@ -4,15 +4,18 @@
 
 项目只保留 CRM 业务和标准协议能力。网页、REST 和 MCP 使用同一个 `CrmService`，因此权限、校验和数据更新行为不会出现三套实现。
 
+本地 TLS 由 mkcert 证书和 Next.js HTTPS 入口负责；部署步骤见[本地 HTTPS 部署](local-https.md)。
+
 ```mermaid
 flowchart LR
   Browser[客户浏览器] --> Web[Next.js CRM 页面]
-  Doubao[豆包工作] -->|HTTPS 隧道| MCP[Streamable HTTP MCP]
+  Doubao[豆包本地注入助手] -->|localhost| MCP[Streamable HTTP MCP]
+  Feishu[飞书 OAuth] -->|浏览器回调 localhost| OAuth[CRM OAuth 2.1 + PKCE]
   Web --> REST[CRM REST API]
   MCP --> Service[CRM Service]
   REST --> Service
   Service --> DB[(SQLite)]
-  Doubao --> OAuth[OAuth 2.1 + PKCE]
+  Doubao -->|localhost| OAuth
   OAuth --> DB
   OAuth --> Service
 ```
@@ -24,7 +27,8 @@ flowchart LR
 | React 页面 | 展示、筛选、表单、账号切换 | 业务权限与数据持久化 |
 | REST Route | HTTP 输入输出与状态码 | 重复实现业务规则 |
 | MCP Route | 协议、Session、工具调用 | 直接读写数据库 |
-| OAuth | 注册、授权码、PKCE、Token | CRM 数据权限判断 |
+| 飞书 OAuth | 登录用户并提供稳定 `open_id` | 发放 CRM/MCP Token |
+| CRM OAuth | 动态注册、授权码、PKCE、Token | CRM 数据权限判断 |
 | CRM Service | 校验、权限、关联关系、汇总 | HTTP/MCP 协议细节 |
 | SQLite | 持久化与外键约束 | 用户界面 |
 
@@ -42,11 +46,13 @@ erDiagram
   OAUTH_CLIENTS ||--o{ OAUTH_ACCESS_TOKENS : receives
 ```
 
-- `users`：内置演示用户，角色为 `admin` 或 `sales`。
+- `users`：CRM 用户，角色为 `admin` 或 `sales`，可唯一绑定飞书 `open_id` 与头像。
 - `customers`：客户生命周期、负责人和跟进汇总。
 - `contacts`：属于一个客户，并继承客户负责人。
 - `activities`：属于一个客户，可选关联联系人；新增跟进会同步客户最近/下次跟进时间。
 - OAuth 表：客户端、待确认请求、一次性授权码、Access Token、Refresh Token。
+
+OAuth code 与 token 同时保存 CRM `user_id` 和飞书 `open_id`。网页仍可自由切换演示账号，而 MCP 始终使用授权时的真实飞书绑定；账号停用或绑定变化后旧 Token 失效。
 
 ## 权限模型
 

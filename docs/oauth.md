@@ -1,73 +1,76 @@
-# OAuth 2.1 与 PKCE
+# 豆包、飞书与 CRM 的双层 OAuth
 
-## 为什么本项目需要 OAuth
+本项目包含两段连续但用途不同的授权：豆包通过 OAuth 2.1 + S256 PKCE 获取 MCP Token；在发放这个 Token 前，CRM 再通过飞书 OAuth 确认真实用户。CRM 不会把飞书 Access Token 交给豆包，也不会把飞书密钥写入数据库或日志。
 
-豆包工作必须知道“当前 MCP 调用代表哪个 CRM 用户”。OAuth 将浏览器里选择的演示账号绑定到 Access Token；之后每次 MCP 请求携带 Token，服务端恢复对应用户及权限。
+## 两类地址
 
-## 完整授权链路
+| 地址 | 谁访问 | 示例 |
+| --- | --- | --- |
+| MCP 与 CRM OAuth 本地入口 | 豆包本地注入助手 | `https://localhost:3000/api/mcp`、`https://localhost:3000/oauth/*` |
+| 飞书浏览器回调 | 用户浏览器 | `https://localhost:3000/oauth/feishu/callback` |
+
+在飞书开放平台将本地回调逐字登记为“重定向 URL”。豆包助手最终回调使用它动态注册的随机 `127.0.0.1` 端口，这与飞书回调是两个不同地址。
+
+本地证书、系统信任和一键启动流程见[本地 HTTPS 部署](local-https.md)。
+
+## 完整链路
 
 ```mermaid
 sequenceDiagram
-  actor User as 用户
-  participant D as 豆包工作
-  participant M as 本地 CRM / HTTPS 隧道
+  actor U as 用户
+  participant D as 豆包本地注入助手
+  participant C as 本地 CRM
+  participant F as 飞书服务端
   participant DB as SQLite
-
-  D->>M: GET Protected Resource Metadata
-  M-->>D: Authorization Server 地址
-  D->>M: POST /oauth/register + redirect_uri
-  M->>DB: 保存客户端与精确回调地址
-  M-->>D: client_id
+  D->>C: 发现元数据并动态注册 redirect_uri
   D->>D: 生成 verifier 与 S256 challenge
-  D->>M: GET /oauth/authorize
-  M->>DB: 保存短时授权请求
-  M-->>User: 展示账号选择与授权确认
-  User->>M: 确认授权
-  M->>DB: 生成一次性 authorization code
-  M-->>D: 302 redirect_uri?code&state
-  D->>M: POST /oauth/token + code_verifier
-  M->>M: SHA-256(verifier) == challenge
-  M->>DB: 消费 code，保存 Token 摘要
-  M-->>D: Access Token + Refresh Token
-  D->>M: Bearer Token 调用 /api/mcp
+  D->>C: GET /oauth/authorize + challenge
+  C->>DB: 保存 5 分钟授权请求与原始 state
+  C-->>U: 302 飞书 authorize + CRM state
+  U->>F: 登录并同意用户基础信息权限
+  F-->>U: 302 localhost/oauth/feishu/callback?code&state
+  U->>C: 浏览器直接访问本机 callback
+  C->>F: 用 code + app secret 换飞书 Token
+  F-->>C: 飞书用户 open_id
+  C->>DB: 绑定或查找 CRM Actor
+  C->>DB: 生成一次性 CRM authorization code
+  C-->>U: 302 豆包 redirect_uri?code&原始state
+  U->>D: 回到豆包
+  D->>C: POST /oauth/token + verifier
+  C->>C: SHA-256(verifier) == challenge
+  C-->>D: CRM Access/Refresh Token
+  D->>C: Bearer Token 调用 /api/mcp
 ```
 
-## “回调到本地”到底指什么
+## 身份绑定规则
 
-服务代码和数据库都运行在本地。为了让豆包访问本机，`cloudflared` 把一个临时 HTTPS 地址转发到 `localhost:3000`：
+1. 相同飞书 `open_id` 每次登录都返回同一个 CRM 用户。
+2. 第一个成功登录的飞书用户绑定 `user_admin`。
+3. 第二、第三位用户依次绑定 `user_alice`、`user_bob`。
+4. 内置销售账号用完后，新登录用户会创建新的销售账号。
+5. 飞书名称和头像在登录时更新；已停用账号拒绝授权。
 
-```text
-豆包 → https://临时域名/oauth/* → cloudflared → localhost:3000/oauth/*
-豆包 → https://临时域名/api/mcp → cloudflared → localhost:3000/api/mcp
+绑定在 SQLite immediate transaction 内完成，并由 `feishu_open_id` 唯一索引避免并发首次登录产生两个管理员。
+
+## PKCE 与 Token 安全
+
+豆包保留随机 `code_verifier`，只发送它的 SHA-256 结果。截获授权码的人没有 verifier 就无法换 Token。
+
+| 凭证 | 有效期 | 规则 |
+| --- | ---: | --- |
+| CRM Authorization Code | 5 分钟 | 一次性，绑定 client、redirect URI、PKCE、CRM 用户和飞书身份 |
+| CRM Access Token | 1 小时 | 数据库只保存 SHA-256 摘要 |
+| CRM Refresh Token | 30 天 | 每次刷新轮换，数据库只保存摘要 |
+
+每次 MCP 调用和刷新都会重新检查：CRM 用户仍启用，且当前 `feishu_open_id` 与 Token 中的绑定一致。修改绑定或停用账号会让旧 Token 失效。
+
+## 配置
+
+```dotenv
+APP_BASE_URL=https://localhost:3000
+LARK_APP_ID=cli_xxx
+LARK_APP_SECRET=xxx
+FEISHU_OAUTH_REDIRECT_URI=https://localhost:3000/oauth/feishu/callback
 ```
 
-OAuth 的 `redirect_uri` 属于客户端豆包。授权确认后，本地服务必须把授权码重定向给豆包，豆包才能调用 `/oauth/token`。因此最终地址栏落在豆包域名是正确行为，不代表 MCP 运行在云端。
-
-## PKCE 的作用
-
-豆包先生成只有自己知道的随机 `code_verifier`，只把它的 SHA-256 结果 `code_challenge` 发给授权服务器。即使授权码被截获，没有原始 verifier 也无法换取 Token。
-
-服务端规则：
-
-- `code_challenge_method` 必须为 `S256`。
-- verifier/challenge 长度和字符集必须符合 PKCE。
-- 授权码有效期 5 分钟且只能消费一次。
-- `client_id`、`redirect_uri` 和 challenge 必须与授权请求完全一致。
-
-## Token 生命周期
-
-| 凭证 | 有效期 | 是否一次性 | 存储方式 |
-| --- | ---: | --- | --- |
-| Authorization Code | 5 分钟 | 是 | SHA-256 摘要 |
-| Access Token | 1 小时 | 否 | SHA-256 摘要 |
-| Refresh Token | 30 天 | 每次刷新轮换 | SHA-256 摘要 |
-
-撤销端点同时支持 Access Token 和 Refresh Token。数据库泄露时不会直接暴露可用 Token 明文。
-
-## 安全检查
-
-- 动态注册最多接受 10 个回调地址。
-- 回调默认必须为 HTTPS；仅 localhost/127.0.0.1 允许 HTTP。
-- 授权时严格匹配登记过的完整 `redirect_uri`。
-- 授权确认使用一次性数据库请求和 CSRF 值，表单不能修改 OAuth 原始参数。
-- Token 与启用的 CRM 用户绑定；用户停用后 Token 无法继续调用 MCP。
+飞书应用需要用户基础信息权限 `contact:user.base:readonly`。错误页只显示失败阶段和安全提示，日志只记录阶段、错误类型与消息，不记录 code、Token 或密钥。

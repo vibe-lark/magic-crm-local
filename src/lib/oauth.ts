@@ -9,7 +9,7 @@ const ACCESS_TTL = 60 * 60_000;
 const REFRESH_TTL = 30 * 24 * 60 * 60_000;
 
 type Client = { client_id: string; client_name: string; redirect_uris: string[]; token_endpoint_auth_method: "none" };
-type TokenRecord = { client_id: string; user_id: string; scope: string; expires_at: number };
+export type TokenRecord = { client_id: string; user_id: string; feishu_open_id: string; scope: string; expires_at: number };
 
 function validRedirectUri(raw: string): string {
   const url = new URL(raw);
@@ -53,14 +53,21 @@ export function createAuthorizationRequest(input: Record<string, string>): { req
   return {requestId,csrf,client};
 }
 
-export function approveAuthorization(requestId:string,csrf:string,userId:string):string {
+export function validateAuthorizationRequest(requestId: string, csrf: string): void {
+  const row = getDb().prepare("SELECT csrf,expires_at FROM oauth_requests WHERE id=?").get(requestId) as { csrf: string; expires_at: number } | undefined;
+  if (!row || row.expires_at <= Date.now() || row.csrf !== csrf) throw new CrmError("invalid_request", "授权请求已失效");
+}
+
+export function approveAuthorization(requestId:string,csrf:string,userId:string,feishuOpenId:string):string {
   const db=getDb();const row=db.prepare("SELECT * FROM oauth_requests WHERE id=?").get(requestId) as Record<string,unknown>|undefined;
   if(!row||Number(row.expires_at)<=Date.now()||String(row.csrf)!==csrf) throw new CrmError("invalid_request","授权请求已失效");
-  const actor=crm.actor(userId);const rawCode=id("crmcode",32);
+  const actor=crm.actor(userId);
+  if(!actor.feishuOpenId||actor.feishuOpenId!==feishuOpenId) throw new CrmError("invalid_request","CRM 账号与飞书身份绑定不一致");
+  const rawCode=id("crmcode",32);
   db.transaction(()=>{
     db.prepare("DELETE FROM oauth_requests WHERE id=?").run(requestId);
-    db.prepare(`INSERT INTO oauth_codes (code_hash,client_id,redirect_uri,code_challenge,scope,user_id,expires_at) VALUES (?,?,?,?,?,?,?)`)
-      .run(sha256(rawCode),row.client_id,row.redirect_uri,row.code_challenge,row.scope,actor.id,Date.now()+CODE_TTL);
+    db.prepare(`INSERT INTO oauth_codes (code_hash,client_id,redirect_uri,code_challenge,scope,user_id,feishu_open_id,expires_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(sha256(rawCode),row.client_id,row.redirect_uri,row.code_challenge,row.scope,actor.id,feishuOpenId,Date.now()+CODE_TTL);
   })();
   const target=new URL(String(row.redirect_uri));target.searchParams.set("code",rawCode);if(row.client_state)target.searchParams.set("state",String(row.client_state));
   return target.toString();
@@ -68,10 +75,10 @@ export function approveAuthorization(requestId:string,csrf:string,userId:string)
 
 function issueTokens(record:TokenRecord) {
   const accessToken=id("crmat",32);const refreshToken=id("crmrt",32);const db=getDb();
-  db.prepare("INSERT INTO oauth_access_tokens (token_hash,client_id,user_id,scope,expires_at) VALUES (?,?,?,?,?)")
-    .run(sha256(accessToken),record.client_id,record.user_id,record.scope,Date.now()+ACCESS_TTL);
-  db.prepare("INSERT INTO oauth_refresh_tokens (token_hash,client_id,user_id,scope,expires_at) VALUES (?,?,?,?,?)")
-    .run(sha256(refreshToken),record.client_id,record.user_id,record.scope,Date.now()+REFRESH_TTL);
+  db.prepare("INSERT INTO oauth_access_tokens (token_hash,client_id,user_id,feishu_open_id,scope,expires_at) VALUES (?,?,?,?,?,?)")
+    .run(sha256(accessToken),record.client_id,record.user_id,record.feishu_open_id,record.scope,Date.now()+ACCESS_TTL);
+  db.prepare("INSERT INTO oauth_refresh_tokens (token_hash,client_id,user_id,feishu_open_id,scope,expires_at) VALUES (?,?,?,?,?,?)")
+    .run(sha256(refreshToken),record.client_id,record.user_id,record.feishu_open_id,record.scope,Date.now()+REFRESH_TTL);
   return {access_token:accessToken,token_type:"Bearer",expires_in:ACCESS_TTL/1000,refresh_token:refreshToken,scope:record.scope};
 }
 
@@ -79,7 +86,7 @@ export function exchangeCode(input:Record<string,string>) {
   const db=getDb();const codeHash=sha256(input.code||"");const row=db.prepare("SELECT * FROM oauth_codes WHERE code_hash=?").get(codeHash) as TokenRecord&{redirect_uri:string;code_challenge:string}|undefined;
   if(!row) throw new CrmError("invalid_grant","授权码无效");
   db.prepare("DELETE FROM oauth_codes WHERE code_hash=?").run(codeHash);
-  if(row.expires_at<=Date.now()||row.client_id!==input.client_id||row.redirect_uri!==new URL(input.redirect_uri).toString()||base64urlSha256(input.code_verifier||"")!==row.code_challenge){
+  if(!row.feishu_open_id||row.expires_at<=Date.now()||row.client_id!==input.client_id||row.redirect_uri!==new URL(input.redirect_uri).toString()||base64urlSha256(input.code_verifier||"")!==row.code_challenge){
     throw new CrmError("invalid_grant","授权码、回调地址或 PKCE 校验失败");
   }
   return issueTokens(row);
@@ -89,14 +96,15 @@ export function refreshAccessToken(input:Record<string,string>) {
   const db=getDb();const hash=sha256(input.refresh_token||"");const row=db.prepare("SELECT * FROM oauth_refresh_tokens WHERE token_hash=?").get(hash) as TokenRecord|undefined;
   if(!row||row.expires_at<=Date.now()||row.client_id!==input.client_id) throw new CrmError("invalid_grant","Refresh Token 无效");
   db.prepare("DELETE FROM oauth_refresh_tokens WHERE token_hash=?").run(hash);
-  crm.actor(row.user_id);
+  const actor=crm.actor(row.user_id);
+  if(actor.feishuOpenId!==row.feishu_open_id) throw new CrmError("invalid_grant","飞书身份绑定已变更");
   return issueTokens(row);
 }
 
 export function verifyAccessToken(rawToken:string):TokenRecord|null {
-  const row=getDb().prepare("SELECT client_id,user_id,scope,expires_at FROM oauth_access_tokens WHERE token_hash=?").get(sha256(rawToken)) as TokenRecord|undefined;
+  const row=getDb().prepare("SELECT client_id,user_id,feishu_open_id,scope,expires_at FROM oauth_access_tokens WHERE token_hash=?").get(sha256(rawToken)) as TokenRecord|undefined;
   if(!row||row.expires_at<=Date.now()) return null;
-  try{crm.actor(row.user_id);return row;}catch{return null;}
+  try{const actor=crm.actor(row.user_id);return actor.feishuOpenId===row.feishu_open_id?row:null;}catch{return null;}
 }
 
 export function revokeToken(rawToken:string):void {

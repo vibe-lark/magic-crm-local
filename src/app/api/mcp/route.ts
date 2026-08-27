@@ -9,6 +9,7 @@ import { crm } from "@/lib/crm/service";
 import { verifyAccessToken } from "@/lib/oauth";
 import { tools } from "@/lib/mcp/tools";
 import { createSession, deleteSession, validateSession } from "@/lib/mcp/sessions";
+import { oauthDiagnostic, shortClientId } from "@/lib/oauth-diagnostics";
 
 export const runtime="nodejs";
 const SESSION_HEADER="Mcp-Session-Id";const ajv=new Ajv({allErrors:true,strict:false});addFormats(ajv);
@@ -23,7 +24,7 @@ async function handle(request:NextRequest){
   let body:unknown;
   if(request.method==="POST"){try{body=await request.clone().json();}catch{return rpcError(null,-32700,"Parse error",400);}}
   const authHeader=request.headers.get("authorization")||"";const credential=authHeader.match(/^Bearer\s+(.+)$/i)?.[1];
-  if(!credential)return unauthorized();const token=verifyAccessToken(credential);if(!token)return unauthorized("Invalid or revoked credential");
+  if(!credential){oauthDiagnostic("mcp_unauthorized","error",{reason:"missing_bearer",method:request.method});return unauthorized();}const token=verifyAccessToken(credential);if(!token){oauthDiagnostic("mcp_unauthorized","error",{reason:"invalid_bearer",method:request.method});return unauthorized("Invalid or revoked credential");}
   const actor=crm.actor(token.user_id);const initialize=request.method==="POST"&&isInitializeRequest(body);const sessionId=request.headers.get(SESSION_HEADER)||"";
   if(!initialize){if(!sessionId)return rpcError(requestId(body),-32000,"Mcp-Session-Id is required",400);if(!validateSession(sessionId,token.user_id,token.client_id))return rpcError(requestId(body),-32001,"Session not found or belongs to another user",404);}
   try{
@@ -41,9 +42,9 @@ async function handle(request:NextRequest){
     const origins=allowedOrigins();const transport=new WebStandardStreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:legacyJson,keepAliveMs:15_000,allowedOrigins:origins,allowedHosts:[...new Set(origins.map((origin)=>new URL(origin).host))],enableDnsRebindingProtection:true});
     await server.connect(transport);const headers=new Headers(request.headers);if(!headers.get("host"))headers.set("host",new URL(request.url).host);if(request.method==="POST"&&!headers.get("accept")?.includes("text/event-stream"))headers.set("accept","application/json, text/event-stream");
     const response=await transport.handleRequest(new Request(request.url,{method:request.method,headers}),{parsedBody:body});
-    if(initialize&&response.ok)response.headers.set(SESSION_HEADER,createSession(token.user_id,token.client_id));
+    if(initialize&&response.ok){response.headers.set(SESSION_HEADER,createSession(token.user_id,token.client_id));oauthDiagnostic("mcp_initialized","success",{clientId:shortClientId(token.client_id),crmUserId:token.user_id});}
     if(request.method==="DELETE"&&response.ok&&sessionId)deleteSession(sessionId);cors(request,response);return response;
-  }catch(error){return rpcError(requestId(body),-32603,error instanceof Error?error.message:"Internal error",500);}
+  }catch(error){if(initialize)oauthDiagnostic("mcp_initialize_rejected","error",{message:error instanceof Error?error.message:"Internal error"});return rpcError(requestId(body),-32603,error instanceof Error?error.message:"Internal error",500);}
 }
 
 export async function OPTIONS(request:NextRequest){const response=new NextResponse(null,{status:204});cors(request,response);return response;}

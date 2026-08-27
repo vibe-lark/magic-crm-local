@@ -73,12 +73,20 @@ function ensureOwner(actor: Actor, ownerId: string): void {
   if (!actor.isAdmin && actor.id !== ownerId) throw new CrmError("FORBIDDEN", "无权访问其他销售负责的数据", 403);
 }
 
-function activeUser(db: Database, userId: string): Actor {
-  const row = db.prepare("SELECT id,name,role FROM users WHERE id=? AND active=1").get(userId) as Row | undefined;
-  if (!row) throw new CrmError("FORBIDDEN", "当前用户不存在或已停用", 403);
+function actorFromRow(row: Row): Actor {
   const role = asString(row.role);
   if (role !== "admin" && role !== "sales") throw new CrmError("FORBIDDEN", "当前用户角色无效", 403);
-  return { id: asString(row.id), name: asString(row.name), role, isAdmin: role === "admin" };
+  return {
+    id: asString(row.id), name: asString(row.name), role, isAdmin: role === "admin",
+    feishuOpenId: nullable(row.feishu_open_id) ?? undefined,
+    avatarUrl: nullable(row.avatar_url) ?? undefined,
+  };
+}
+
+function activeUser(db: Database, userId: string): Actor {
+  const row = db.prepare("SELECT id,name,role,feishu_open_id,avatar_url FROM users WHERE id=? AND active=1").get(userId) as Row | undefined;
+  if (!row) throw new CrmError("FORBIDDEN", "当前用户不存在或已停用", 403);
+  return actorFromRow(row);
 }
 
 function patchSql(table: string, recordId: string, values: Record<string, unknown>, db: Database): void {
@@ -97,6 +105,43 @@ export class CrmService {
   }
 
   actor(userId: string): Actor { return activeUser(this.db, userId); }
+
+  actorByFeishu(profile: { openId: string; name?: string; avatarUrl?: string }): Actor {
+    const openId = requiredString(profile.openId, "飞书 Open ID");
+    const displayName = optionalString(profile.name, "飞书用户名", 200);
+    const avatarUrl = optionalString(profile.avatarUrl, "飞书头像", 2000);
+
+    return this.db.transaction(() => {
+      let row = this.db.prepare("SELECT * FROM users WHERE feishu_open_id=?").get(openId) as Row | undefined;
+      if (row) {
+        if (!bool(row.active)) throw new CrmError("FORBIDDEN", "当前飞书用户绑定的 CRM 账号已停用", 403);
+        this.db.prepare("UPDATE users SET name=COALESCE(?,name), avatar_url=COALESCE(?,avatar_url) WHERE id=?")
+          .run(displayName ?? null, avatarUrl ?? null, row.id);
+        return activeUser(this.db, asString(row.id));
+      }
+
+      const boundCount = Number((this.db.prepare("SELECT COUNT(*) AS count FROM users WHERE feishu_open_id IS NOT NULL").get() as { count: number }).count);
+      if (boundCount === 0) {
+        row = this.db.prepare("SELECT * FROM users WHERE id='user_admin'").get() as Row | undefined;
+      } else {
+        row = this.db.prepare(`SELECT * FROM users
+          WHERE id IN ('user_alice','user_bob') AND feishu_open_id IS NULL
+          ORDER BY CASE id WHEN 'user_alice' THEN 1 ELSE 2 END LIMIT 1`).get() as Row | undefined;
+      }
+
+      if (row) {
+        if (!bool(row.active)) throw new CrmError("FORBIDDEN", "待绑定的 CRM 账号已停用", 403);
+        this.db.prepare("UPDATE users SET feishu_open_id=?, name=COALESCE(?,name), avatar_url=? WHERE id=?")
+          .run(openId, displayName ?? null, avatarUrl ?? null, row.id);
+        return activeUser(this.db, asString(row.id));
+      }
+
+      const userId = id("user");
+      this.db.prepare("INSERT INTO users (id,name,role,active,feishu_open_id,avatar_url) VALUES (?,?, 'sales',1,?,?)")
+        .run(userId, displayName || "飞书销售用户", openId, avatarUrl ?? null);
+      return activeUser(this.db, userId);
+    }).immediate();
+  }
 
   bootstrap(userId: string) {
     const actor = this.actor(userId);

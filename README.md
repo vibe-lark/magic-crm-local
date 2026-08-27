@@ -1,6 +1,6 @@
 # 妙笔 CRM 独立演示项目
 
-这是一个可完全在本地运行的 CRM + MCP 客户演示项目。它从原妙笔 CRM 中提取了客户、联系人、跟进和权限业务，不依赖妙笔 FaaS、飞书登录、飞书多维表格、Redis 或任何私有平台运行时。
+这是一个可完全在本地运行的 CRM + MCP 客户演示项目。它从原妙笔 CRM 中提取了客户、联系人、跟进和权限业务，不依赖妙笔 FaaS、飞书多维表格、Redis 或任何私有平台运行时；MCP 授权保留真实飞书 OAuth 登录。
 
 一个 Next.js 进程同时提供：
 
@@ -10,24 +10,34 @@
 - CRM REST API
 - MCP Streamable HTTP 服务
 - OAuth 2.1、动态客户端注册和 S256 PKCE
+- 飞书 OAuth 用户登录与 CRM 账号绑定
 - 豆包工作接入与诊断控制台
 
 ## 快速开始
 
-环境要求：Node.js 20+、Bun 1.3+。首次启动执行：
+macOS 或 Linux 首次启动直接执行：
 
 ```bash
-cp .env.example .env.local
-bun install
-bun run db:init
-bun run dev
+bash scripts/local-demo.sh
 ```
+
+脚本会检查并安装 Bun、mkcert 和系统证书工具，安全读取缺失的飞书凭证，生成本机可信证书、初始化 SQLite，再启动 HTTPS 服务。首次信任本地 CA 时，操作系统会正常要求密码或 sudo。
+
+已安装 Bun 时也可使用：
+
+```bash
+bun run local          # 配置并启动
+bun run local:setup    # 只配置，不启动
+bun run local:check    # 只读检查当前部署
+```
+
+启动后还需在飞书开放平台精确登记 `https://localhost:3000/oauth/feishu/callback`。完整原理、手动安装、Linux 差异和故障排查见[本地 HTTPS 部署](docs/local-https.md)。
 
 打开：
 
-- CRM：<http://localhost:3000>
-- MCP 演示控制台：<http://localhost:3000/demo>
-- 健康检查：<http://localhost:3000/api/health>
+- CRM：<https://localhost:3000>
+- MCP 演示控制台：<https://localhost:3000/demo>
+- 健康检查：<https://localhost:3000/api/health>
 
 项目会自动创建 `data/crm.sqlite` 并写入示例数据。需要恢复演示初始状态时执行：
 
@@ -48,40 +58,30 @@ bun run db:reset
 
 ## 在豆包工作中连接本地 MCP
 
-豆包工作不能访问你电脑上的 `localhost`。本项目仍在本机运行，只使用 HTTPS 隧道让豆包访问它。
+豆包工作的本地 MCP 注入助手会直接访问你电脑上的 `localhost`，并在本机随机端口接收 OAuth 回调，不需要公网隧道。
 
 ### 1. 启动本地服务
 
 ```bash
-bun run dev
+bun run local
 ```
 
-### 2. 建立 HTTPS 隧道
+### 2. 确认本地根地址
 
-安装 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)，然后执行：
-
-```bash
-cloudflared tunnel --url http://localhost:3000
-```
-
-终端会返回类似 `https://example.trycloudflare.com` 的临时地址。
-
-### 3. 更新公开根地址
-
-编辑 `.env.local`：
+`.env.local` 保持：
 
 ```dotenv
-APP_BASE_URL=https://example.trycloudflare.com
+APP_BASE_URL=https://localhost:3000
 ```
 
-重启 `bun run dev`，再打开 `/demo` 确认控制台显示的是 HTTPS 地址。
+打开 `/demo` 确认服务与飞书 OAuth 均已配置。
 
-### 4. 注册连接器
+### 3. 注入连接器
 
 在豆包工作添加自定义 MCP，填写：
 
 ```text
-https://example.trycloudflare.com/api/mcp
+https://localhost:3000/api/mcp
 ```
 
 豆包会自动：
@@ -89,20 +89,21 @@ https://example.trycloudflare.com/api/mcp
 1. 读取 Protected Resource Metadata。
 2. 读取 OAuth Authorization Server Metadata。
 3. 动态注册豆包自己的 `redirect_uri`。
-4. 打开本项目的授权页。
-5. 使用 S256 PKCE 交换 Token。
-6. 初始化 MCP Session 并读取工具列表。
+4. 经本项目跳转飞书登录。
+5. 飞书回调本机服务，本机再把 CRM 授权码交回豆包。
+6. 使用 S256 PKCE 交换 Token。
+7. 初始化 MCP Session 并读取工具列表。
 
-授权页选择管理员或销售账号即可。最终 OAuth 完成页面由豆包展示，因为授权码必须交回豆包后，豆包才能完成 Token 交换。
+首次成功登录的飞书用户绑定管理员，第二、第三位用户依次绑定两个内置销售账号；之后的新用户获得新的销售账号。CRM 网页仍保留内置账号切换，便于演示。
 
-> 临时隧道地址每次可能变化。变化后需要更新 `APP_BASE_URL`、重启服务，并在豆包中重新创建或更新连接器。
+若授权失败，打开 `/demo` 的“OAuth 实时诊断”，清空后重新注入一次；日志不会记录 code、Token、PKCE 原文或飞书密钥。
 
 ## 本地 MCP 调试
 
 推荐先用 MCP Inspector 验证本地服务，再接入豆包。由于 MCP 端点强制 OAuth，可使用 Inspector 的 OAuth 流程连接：
 
 ```text
-http://localhost:3000/api/mcp
+https://localhost:3000/api/mcp
 ```
 
 标准发现端点：
@@ -121,13 +122,15 @@ http://localhost:3000/api/mcp
 ## 常用命令
 
 ```bash
-bun run dev          # 本地开发
-bun run build        # 生产构建
-bun run start        # 启动生产构建
-bun run typecheck    # TypeScript 检查
-bun test             # 自动化测试
-bun run db:init      # 初始化数据库
-bun run db:reset     # 重置为演示数据
+bun run local          # 一键配置并启动 HTTPS 演示
+bun run local:setup    # 只配置依赖、环境、证书和数据库
+bun run local:check    # 只读检查证书、配置和运行端点
+bun run local -- --reset-db  # 重置演示数据后启动
+bun run dev            # 使用已有证书启动 HTTPS 开发服务
+bun run dev:http       # 仅网页调试；不能用于豆包 OAuth
+bun run build          # 生产构建验证
+bun run typecheck      # TypeScript 检查
+bun test               # 自动化测试
 ```
 
 ## 项目结构
@@ -140,6 +143,7 @@ src/
     ├── crm/             # 纯业务模型、校验、权限和 Service
     ├── db/              # SQLite schema、连接与演示数据
     ├── mcp/             # MCP 工具定义与 Session
+    ├── feishu-oauth.ts  # 飞书登录与用户信息
     └── oauth.ts         # OAuth 2.1/PKCE 实现
 docs/                    # 架构、OAuth、MCP 与客户演示说明
 scripts/                 # 数据库初始化脚本
@@ -151,15 +155,16 @@ tests/                   # 业务、OAuth 与 MCP 测试
 本项目用于本地客户演示，不是生产身份系统：
 
 - 网页账号切换是刻意提供的演示能力，浏览器 Cookie 不代表企业 SSO。
-- OAuth 授权页只能选择数据库中的启用账号。
+- MCP 身份来自飞书登录；网页账号切换仅用于本地 UI 演示。
 - 授权码一次性使用，Access/Refresh Token 只以 SHA-256 摘要保存在 SQLite。
 - OAuth 只接受精确登记的 `redirect_uri`，并强制 S256 PKCE。
 - MCP Session 只保存在当前进程；重启后客户端需要重新初始化。
-- 公网演示请使用临时隧道，不要将数据库文件提交或长期暴露。
+- 本地注入只需监听 localhost；不要将数据库文件、应用密钥或诊断信息提交到代码仓库。
 
 ## 延伸阅读
 
 - [技术架构](docs/architecture.md)
+- [本地 HTTPS 一键部署](docs/local-https.md)
 - [OAuth 2.1 与 PKCE](docs/oauth.md)
 - [MCP 接口与工具](docs/mcp.md)
 - [客户演示脚本](docs/demo-guide.md)

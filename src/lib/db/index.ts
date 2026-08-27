@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { databasePath } from "@/lib/config";
-import { schema } from "./schema";
+import { migrateSchema, schema } from "./schema";
 import { seed } from "./seed";
 
 declare global {
@@ -17,6 +17,7 @@ export function getDb(): Database.Database {
   const db = new Database(filename);
   db.pragma("journal_mode = WAL");
   db.exec(schema);
+  migrateSchema(db);
   seed(db);
   globalThis.__crmDatabase = db;
   return db;

@@ -2,7 +2,14 @@ export type Role = "admin" | "sales";
 export type CustomerStage = "线索" | "意向" | "客户" | "停用";
 export type ActivityType = "电话" | "会议" | "邮件" | "拜访" | "其他";
 
-export type Actor = { id: string; name: string; role: Role; isAdmin: boolean };
+export type Actor = {
+  id: string;
+  name: string;
+  role: Role;
+  isAdmin: boolean;
+  feishuOpenId?: string;
+  avatarUrl?: string;
+};
 
 export type Customer = {
   id: string;

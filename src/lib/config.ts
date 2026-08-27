@@ -6,7 +6,15 @@ export const MCP_VERSION = "1.0.0";
 export const MCP_SCOPE = "mcp:invoke";
 
 export function appBaseUrl(): string {
-  return (process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
+  return (process.env.APP_BASE_URL || "https://localhost:3000").replace(/\/+$/, "");
+}
+
+export function feishuCallbackUrl(): string {
+  return (process.env.FEISHU_OAUTH_REDIRECT_URI || "https://localhost:3000/oauth/feishu/callback").trim();
+}
+
+export function feishuOauthConfigured(): boolean {
+  return Boolean(process.env.LARK_APP_ID?.trim() && process.env.LARK_APP_SECRET?.trim());
 }
 
 export function databasePath(): string {
@@ -19,5 +27,5 @@ export function allowedOrigins(): string[] {
     .split(/[\s,]+/)
     .map((value) => value.trim().replace(/\/+$/, ""))
     .filter(Boolean);
-  return [...new Set([appBaseUrl(), "http://localhost:3000", "http://127.0.0.1:3000", ...configured])];
+  return [...new Set([appBaseUrl(), "https://localhost:3000", "https://127.0.0.1:3000", "http://localhost:3000", "http://127.0.0.1:3000", ...configured])];
 }

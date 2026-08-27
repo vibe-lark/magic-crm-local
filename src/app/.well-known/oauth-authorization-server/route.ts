@@ -1,2 +1,3 @@
 import { authorizationServerMetadata } from "@/lib/oauth";
-export async function GET(){return Response.json(authorizationServerMetadata(),{headers:{"Cache-Control":"no-store"}});}
+import { oauthDiagnostic } from "@/lib/oauth-diagnostics";
+export async function GET(){oauthDiagnostic("authorization_metadata_read");return Response.json(authorizationServerMetadata(),{headers:{"Cache-Control":"no-store"}});}

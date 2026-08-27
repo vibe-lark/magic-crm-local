@@ -18,6 +18,8 @@ Mcp-Session-Id: <initialize 响应返回的 session id>
 
 没有 Token 时返回 HTTP 401，并通过 `WWW-Authenticate` 指向 Protected Resource Metadata。
 
+豆包本地 MCP 注入填写 `https://localhost:3000/api/mcp`。注入助手直接访问本机 discovery、OAuth 与 MCP 端点，并在随机 `127.0.0.1` 端口接收最终授权回调。OAuth 浏览器地址必须为 HTTPS。安装与证书排查见[本地 HTTPS 部署](local-https.md)，协议链路见 [OAuth 链路](oauth.md)。
+
 ## 工具清单
 
 | 工具 | 用途 | 关键参数 |
@@ -60,7 +62,7 @@ Mcp-Session-Id: <initialize 响应返回的 session id>
 获得 OAuth Token 后：
 
 ```bash
-curl -i http://localhost:3000/api/mcp \
+curl -i https://localhost:3000/api/mcp \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
@@ -79,7 +81,7 @@ curl -i http://localhost:3000/api/mcp \
 保存响应头 `Mcp-Session-Id`，后续调用：
 
 ```bash
-curl http://localhost:3000/api/mcp \
+curl https://localhost:3000/api/mcp \
   -H 'Authorization: Bearer <token>' \
   -H 'Mcp-Session-Id: <session>' \
   -H 'Content-Type: application/json' \
@@ -92,8 +94,10 @@ curl http://localhost:3000/api/mcp \
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| 豆包无法访问地址 | 使用了 localhost 或隧道已失效 | 重建隧道并更新 `APP_BASE_URL` |
+| 注入助手无法访问地址 | 本地 Next.js 未运行或端口不一致 | 启动服务并确认 `/api/health` |
 | `invalid_client` | 旧连接器的回调与新动态注册不一致 | 删除连接器后重新注册 |
+| 飞书提示 redirect URI 错误 | 开放平台登记值与环境变量不一致 | 精确登记本地 callback |
+| 授权回调打不开 | 本地服务未启动或 3000 端口不一致 | 启动服务并核对飞书 localhost callback |
 | PKCE 校验失败 | 授权码、verifier 或回调地址不匹配 | 重新发起完整授权，不复用旧 code |
 | HTTP 401 | Token 缺失、过期或撤销 | 重新授权或刷新 Token |
 | Session 404 | 服务重启或 Session 属于其他账号 | 重新执行 MCP initialize |
