@@ -21,7 +21,13 @@ macOS 或 Linux 首次启动直接执行：
 bash scripts/local-demo.sh
 ```
 
-脚本会检查并安装 Bun、mkcert 和系统证书工具，安全读取缺失的飞书凭证，生成本机可信证书、初始化 SQLite，再启动 HTTPS 服务。首次输入飞书凭证后，脚本会复制 callback、打开当前应用的飞书安全设置页；粘贴保存重定向 URL 后按回车即可继续。首次信任本地 CA 时，操作系统会正常要求密码或 sudo。
+Windows 10/11 x64 可以在资源管理器中双击 `scripts\local-demo.cmd`，也可以在 Windows PowerShell 5.1 中执行：
+
+```powershell
+.\scripts\local-demo.cmd
+```
+
+脚本会检查并安装 Bun、mkcert 和系统证书工具，安全读取缺失的飞书凭证，生成本机可信证书、初始化 SQLite，再启动 HTTPS 服务。首次输入飞书凭证后，脚本会复制 callback、打开当前应用的飞书安全设置页；粘贴保存重定向 URL 后按回车即可继续。首次信任本地 CA 时，macOS/Linux 会要求密码或 sudo，Windows 会显示正常的 UAC/证书信任确认。
 
 已安装 Bun 时也可使用：
 
@@ -32,7 +38,7 @@ bun run local:check    # 只读检查当前部署
 bun run local -- --open-feishu  # 重新打开飞书安全设置
 ```
 
-启动后还需在飞书开放平台精确登记 `https://localhost:3000/oauth/feishu/callback`。完整原理、手动安装、Linux 差异和故障排查见[本地 HTTPS 部署](docs/local-https.md)。
+启动后还需在飞书开放平台精确登记 `https://localhost:3000/oauth/feishu/callback`。完整原理、Windows/macOS/Linux 差异、手动安装和故障排查见[本地 HTTPS 部署](docs/local-https.md)。
 
 打开：
 
@@ -152,6 +158,8 @@ docs/                    # 架构、OAuth、MCP 与客户演示说明
 scripts/                 # 本地部署、数据库初始化和发布检查
 tests/                   # 业务、OAuth 与 MCP 测试
 ```
+
+本地部署入口会自动分流：`local-demo.mjs` 让所有平台共用 `bun run local*` 命令，Windows 使用 `local-demo.ps1`，macOS/Linux 使用 `local-demo.sh`；`local-demo.cmd` 是无需预装 Bun 的 Windows 双击入口。
 
 ## 安全边界
 

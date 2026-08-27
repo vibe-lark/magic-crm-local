@@ -43,6 +43,7 @@ done
 
 if $CHECK_ONLY && $RESET_DB; then fail "--check cannot be combined with --reset-db"; fi
 if $CHECK_ONLY && $OPEN_FEISHU; then fail "--check cannot be combined with --open-feishu"; fi
+if $CHECK_ONLY && $SETUP_ONLY; then fail "--check cannot be combined with --setup-only"; fi
 
 cd "$PROJECT_DIR"
 

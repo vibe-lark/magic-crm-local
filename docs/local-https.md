@@ -5,7 +5,7 @@
 - [为什么 localhost 也需要 HTTPS](#为什么-localhost-也需要-https)
 - [一键启动](#一键启动)
 - [脚本做了什么](#脚本做了什么)
-- [macOS 与 Linux 差异](#macos-与-linux-差异)
+- [Windows、macOS 与 Linux 差异](#windowsmacos-与-linux-差异)
 - [地址与证书关系](#地址与证书关系)
 - [手动配置](#手动配置)
 - [日常使用与更新](#日常使用与更新)
@@ -25,19 +25,25 @@ reason=invalid_https_url
 
 ## 一键启动
 
-未安装 Bun 时直接运行：
+macOS/Linux 未安装 Bun 时直接运行：
 
 ```bash
 bash scripts/local-demo.sh
 ```
 
-已安装 Bun 时运行：
+Windows 10/11 x64 未安装 Bun 时，在资源管理器中双击 `scripts\local-demo.cmd`，或打开 Windows PowerShell 5.1 执行：
+
+```powershell
+.\scripts\local-demo.cmd
+```
+
+已安装 Bun 时，三个系统均使用相同命令：
 
 ```bash
 bun run local
 ```
 
-首次运行可能要求系统密码或 sudo，这是 macOS Keychain 或 Linux 系统证书库信任本地 CA 的正常安全步骤。脚本不会读取或保存系统密码。
+首次运行可能要求系统密码、sudo 或 Windows UAC 确认，这是操作系统信任本地 CA 的正常安全步骤。脚本不会读取或保存系统密码。
 
 首次输入飞书 App ID/Secret 后，脚本会自动复制 callback，并打开该应用的飞书开放平台“安全设置”页面：
 
@@ -59,13 +65,13 @@ Feishu callback: https://localhost:3000/oauth/feishu/callback
 
 ## 脚本做了什么
 
-`scripts/local-demo.sh` 按顺序执行：
+跨平台入口 `scripts/local-demo.mjs` 会在 Windows 调用 `local-demo.ps1`，在 macOS/Linux 调用 `local-demo.sh`。平台脚本按顺序执行：
 
-1. 检测 macOS/Linux、Bun、curl、OpenSSL 和 mkcert。
-2. 缺少工具时通过 Homebrew、apt/dnf 或官方安装器补齐。
+1. 检测受支持的系统和 CPU 架构，并检查 Bun、证书工具和 mkcert。
+2. 缺少工具时通过官方安装器、固定版本二进制、Homebrew 或 apt/dnf 补齐。
 3. 安装 mkcert 本地 CA 到操作系统和浏览器信任库。
 4. 生成包含 `localhost`、`127.0.0.1`、`::1` 的证书。
-5. 将私钥权限设为 `0600`，证书剩余不足 30 天时自动重建。
+5. 限制私钥只供当前用户读取；证书剩余不足 30 天时自动重建。
 6. 创建或保留 `.env.local`，只交互补充缺失的飞书 App ID/Secret。
 7. 首次配置时复制 callback、打开当前应用的 `/safe` 安全设置，并等待用户保存确认。
 8. 强制统一 HTTPS base URL、飞书 callback 和允许的 Origin。
@@ -74,7 +80,16 @@ Feishu callback: https://localhost:3000/oauth/feishu/callback
 
 脚本不会覆盖已有飞书凭证，不会自动重置 CRM 数据，也不会杀死占用 3000 端口的未知进程。
 
-## macOS 与 Linux 差异
+## Windows、macOS 与 Linux 差异
+
+### Windows 10/11 x64
+
+- 原生支持系统自带的 Windows PowerShell 5.1，不要求 PowerShell 7、WSL 或 Git Bash。
+- `local-demo.cmd` 可双击运行，并能在缺少 Bun 时调用官方 Windows 安装器；安装 Bun 后也可使用全部 `bun run local*` 命令。
+- mkcert 固定下载 `v1.4.4` Windows amd64 到 `%LOCALAPPDATA%\MagicCrmDemo\bin`，不会写入项目或系统目录。
+- `mkcert -install` 会向 Windows 证书库登记本地 CA，系统可能弹出 UAC 或证书信任确认；确认后应彻底退出并重开豆包。
+- localhost 私钥使用 Windows ACL 关闭继承并只授权当前用户，`.env.local` 使用 UTF-8 无 BOM 写入。
+- 脚本只支持 x64；ARM64 Windows 会明确停止，避免下载错误的原生 SQLite 和 mkcert 二进制。
 
 ### macOS
 
@@ -102,7 +117,7 @@ Feishu callback: https://localhost:3000/oauth/feishu/callback
 
 ## 手动配置
 
-脚本不可用时，可手动执行：
+macOS/Linux 脚本不可用时，可手动执行：
 
 ```bash
 mkcert -install
@@ -116,6 +131,22 @@ bun install
 bun run db:init
 bun run dev
 ```
+
+Windows 可在 PowerShell 中手动执行同等步骤（先自行安装 Bun 和 mkcert）：
+
+```powershell
+mkcert -install
+New-Item -ItemType Directory -Force .cert
+mkcert -cert-file .cert/localhost.pem `
+  -key-file .cert/localhost-key.pem `
+  localhost 127.0.0.1 ::1
+Copy-Item .env.example .env.local
+bun install
+bun run db:init
+bun run dev
+```
+
+推荐仍使用 `.\scripts\local-demo.cmd --setup-only`，因为它还会收紧私钥 ACL、无 BOM 写入配置并引导登记飞书 callback。
 
 `.env.local` 的关键配置：
 
@@ -148,6 +179,9 @@ bun run local -- --reset-db   # 明确丢弃本地演示修改并重置
 | `Port 3000 is already in use` | 已有服务或其他程序占用 | 停止对应进程，不要让脚本自动杀进程 |
 | health 成功但授权不弹窗 | 连接器缓存旧 metadata | 删除连接器并重新注入 |
 | Linux 浏览器仍不信任 | NSS 库未更新或浏览器未重启 | 安装 NSS 工具，重跑 `mkcert -install` 并重启客户端 |
+| Windows 拦截脚本执行 | PowerShell 执行策略限制 | 使用 `local-demo.cmd`；它只对当前进程传入 `ExecutionPolicy Bypass`，不会修改系统策略 |
+| Windows 下载失败 | GitHub、bun.sh 被代理或安全软件拦截 | 配置系统代理后重试，或手动安装 Bun/mkcert；不要从未知镜像下载可执行文件 |
+| Windows 证书仍不受信任 | UAC/证书确认被取消，或豆包仍在使用旧进程 | 重跑脚本并接受 `mkcert -install` 提示，随后彻底退出并重开豆包 |
 
 可打开 `https://localhost:3000/demo` 查看脱敏 OAuth 诊断，或运行：
 
@@ -158,7 +192,7 @@ bun run local:check
 ## 安全边界
 
 - 本地 CA 只用于开发演示，不替代互联网生产证书。
-- `.cert/localhost-key.pem` 和 `.env.local` 权限为 `0600`，不得分享或提交。
+- macOS/Linux 的 `.cert/localhost-key.pem` 和 `.env.local` 权限为 `0600`；Windows 私钥使用受保护 ACL。两者均不得分享或提交。
 - OAuth 诊断不记录 authorization code、Token、PKCE 原文或飞书密钥。
 - 脚本只监听本机服务，不创建公网隧道，不上传数据库。
 - 不再使用本项目时，可按 mkcert 输出的 CAROOT 删除本地 CA，并从系统信任库移除对应证书。
