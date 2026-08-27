@@ -28,7 +28,7 @@ async function handle(request:NextRequest){
   const actor=crm.actor(token.user_id);const initialize=request.method==="POST"&&isInitializeRequest(body);const sessionId=request.headers.get(SESSION_HEADER)||"";
   if(!initialize){if(!sessionId)return rpcError(requestId(body),-32000,"Mcp-Session-Id is required",400);if(!validateSession(sessionId,token.user_id,token.client_id))return rpcError(requestId(body),-32001,"Session not found or belongs to another user",404);}
   try{
-    const server=new Server({name:MCP_NAME,version:MCP_VERSION},{capabilities:{tools:{listChanged:false}},instructions:"查询和维护妙笔 CRM。所有操作均受管理员/销售数据权限约束，删除采用软归档。"});
+    const server=new Server({name:MCP_NAME,version:MCP_VERSION},{capabilities:{tools:{listChanged:false}},instructions:"查询和维护明日 CRM。所有操作均受管理员/销售数据权限约束，删除采用软归档。"});
     const validators=new Map(tools.map((tool)=>[tool.name,ajv.compile(tool.inputSchema)]));
     server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:tools.map(({name,description,inputSchema})=>({name,description,inputSchema})) as never}));
     server.setRequestHandler(CallToolRequestSchema,async(message)=>{

@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export const APP_NAME = "妙笔 CRM";
+export const APP_NAME = "明日 CRM";
 export const MCP_NAME = "magic-crm-mcp";
 export const MCP_VERSION = "1.0.0";
 export const MCP_SCOPE = "mcp:invoke";
