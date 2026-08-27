@@ -1,0 +1,10 @@
+node_modules/
+.next/
+data/*.sqlite
+data/*.sqlite-*
+coverage/
+.env
+.env.local
+!.env.example
+!next-env.d.ts
+*.log
