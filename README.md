@@ -13,6 +13,11 @@
 - 飞书 OAuth 用户登录与 CRM 账号绑定
 - 豆包工作接入与诊断控制台
 
+## 在线体验与开发文档
+
+- [在线体验服务](https://bytedance.feishuapp.cn/app/app_17cya58eg1h/services)：配置自己的飞书应用，快速生成并体验对应的明日 CRM MCP 服务。
+- [《豆包工作 MCP 企业内开发指南》](https://bytedance.larkoffice.com/docx/WFmMdKeq0ockkdxVAmScFKE6npg?preview_comment_id=7678985540376529867)：介绍 MCP Streamable HTTP 与 OAuth 2.1 的实现流程，涵盖 PKCE、飞书 OAuth、自定义 OIDC/OAuth SSO 以及 OAuth 2.0 升级 2.1 的关键改造点。开发自有 MCP 服务时，建议结合该文档阅读。
+
 ## 快速开始
 
 macOS 或 Linux 首次启动直接执行：
